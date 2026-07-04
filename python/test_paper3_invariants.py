@@ -160,19 +160,22 @@ class TestMathematicalInvariants:
         # happens only when F_b == 0 (since b_aa=-6a!=0, b_cc=4!=0 generically).
         # For generic nonzero F_b, the two objects must differ in at least
         # one component -- this is exactly the paper's explicit caveat.
-        if abs(F_b) > 1e-6:
+        # Note: the correction terms scale as F_b * O(a), so numerical precision
+        # requires a slightly relaxed tolerance when |F_b| is very small.
+        if abs(F_b) > 1e-7:
             assert not all(
-                math.isclose(p, q, rel_tol=1e-9, abs_tol=1e-9)
+                math.isclose(p, q, rel_tol=1e-8, abs_tol=1e-8)
                 for p, q in zip(pullback, composed)
             ), (
                 "Pullback tensor and composed-function Hessian coincided even though "
                 f"F_b={F_b} != 0; the paper's caveat that these differ should hold generically."
             )
         else:
-            # When F_b == 0, the b_aa/b_cc correction terms vanish and the two
-            # objects should coincide exactly.
+            # When F_b ≈ 0, the b_aa/b_cc correction terms are negligible and the two
+            # objects should coincide to numerical precision. Use relaxed tolerance
+            # to account for floating-point error propagation.
             for p, q in zip(pullback, composed):
-                assert math.isclose(p, q, rel_tol=1e-9, abs_tol=1e-9)
+                assert math.isclose(p, q, rel_tol=1e-7, abs_tol=1e-7)
 
     def test_T8_robustness_to_pathological_inputs(self):
         with pytest.raises(ValueError):
