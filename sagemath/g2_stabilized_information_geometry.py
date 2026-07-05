@@ -198,15 +198,22 @@ def constant_C1(config: RegularizedG2Config, kappa, c0: object = None) -> object
 # Section 5: direct numerical partition function (no SciPy dependency)
 # ---------------------------------------------------------------------------
 
+_GAUSS_LEGENDRE_NODES_WEIGHTS_CACHE = {}
+
 def _gauss_legendre_nodes_weights(n: int, ring):
     """Return (nodes, weights) for n-point Gauss-Legendre quadrature on
     [-1, 1], computed via sage's numerical root-finding on Legendre
     polynomials to avoid any external numerical dependency.
 
-    Complexity: O(n^2) via Newton iteration on each of the n roots.
+    Complexity: O(n^2) via Newton iteration on each of the n roots. Cached so
+    repeated calls with the same order and precision are fast.
     """
-    x = sage.polygen(ring, 'x')
-    Pn = sage.gen_legendre_P(n, 0, x)  # sage's Legendre polynomial P_n(x)
+    cache_key = (n, getattr(ring, 'precision', None), type(ring).__name__)
+    if cache_key in _GAUSS_LEGENDRE_NODES_WEIGHTS_CACHE:
+        return _GAUSS_LEGENDRE_NODES_WEIGHTS_CACHE[cache_key]
+
+    x = sage.var('x')
+    Pn = sage.gen_legendre_P(n, 0, x)
     Pn_prime = Pn.derivative(x)
     roots = Pn.roots(ring=ring, multiplicities=False)
     nodes = sorted(roots)
@@ -214,7 +221,9 @@ def _gauss_legendre_nodes_weights(n: int, ring):
     for xi in nodes:
         denom = (1 - xi ** 2) * (Pn_prime(x=xi)) ** 2
         weights.append(ring(2) / denom)
-    return nodes, weights
+    result = (nodes, weights)
+    _GAUSS_LEGENDRE_NODES_WEIGHTS_CACHE[cache_key] = result
+    return result
 
 
 def _integrate_gauss_legendre(f: Callable, a, b, ring, n: int = 64) -> object:
@@ -308,10 +317,17 @@ def partition_function_reduced(config: RegularizedG2Config, beta, kappa,
             config, kappa if kappa < kappa_c(config) else kappa_c(config) - R(1)
         )
 
+    theta_nodes, theta_weights = _gauss_legendre_nodes_weights(n_theta, R)
+    two_pi = 2 * R(sage.pi)
+    half_len = two_pi / 2
+    mid = R(sage.pi)
+
     def theta_integral(u):
-        def integrand(theta):
-            return (sage.sin(6 * theta)) ** 2 * sage.exp(-beta * lam * u ** 3 * sage.cos(6 * theta))
-        return _integrate_gauss_legendre(integrand, R(0), 2 * R(sage.pi), R, n=n_theta)
+        total = R(0)
+        for xi, wi in zip(theta_nodes, theta_weights):
+            theta = mid + half_len * xi
+            total += wi * (sage.sin(6 * theta) ** 2) * sage.exp(-beta * lam * u ** 3 * sage.cos(6 * theta))
+        return total * half_len
 
     def u_integrand(u):
         radial = sage.exp(-beta * (mu2 * u + kappa * u ** 2 + nu * u ** 3)) * (c0 * u ** 6)
