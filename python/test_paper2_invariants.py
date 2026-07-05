@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 
 import pytest
-from hypothesis import given, settings, strategies as st
+from hypothesis import assume, given, settings, strategies as st
 
 from paper2_g2_critical_orbits import (
     RootBranch,
@@ -57,8 +57,7 @@ class TestMathematicalInvariants:
     @given(mu2=mu2_strategy, lambda_=lambda_strategy, kappa=kappa_neg_strategy)
     def test_T1_radii_satisfy_defining_quadratics(self, mu2, lambda_, kappa):
         cfg = TruncatedG2Config(mu2=mu2, lambda_=lambda_)
-        if kappa**2 <= 3.0 * lambda_ * mu2:
-            pytest.skip("Outside short-root existence domain for this sample.")
+        assume(kappa**2 > 3.0 * lambda_ * mu2)
         u_s_plus, u_s_minus = short_root_radii(cfg, kappa)
         u_l = long_root_radius(cfg, kappa)
 
@@ -73,8 +72,7 @@ class TestMathematicalInvariants:
     @given(mu2=mu2_strategy, lambda_=lambda_strategy, kappa=kappa_neg_strategy)
     def test_T2_hessian_signatures_exact(self, mu2, lambda_, kappa):
         cfg = TruncatedG2Config(mu2=mu2, lambda_=lambda_)
-        if kappa**2 <= 3.0 * lambda_ * mu2:
-            pytest.skip("Outside short-root existence domain for this sample.")
+        assume(kappa**2 > 3.0 * lambda_ * mu2)
 
         spec_splus = hessian_spectrum(cfg, kappa, RootBranch.SHORT_PLUS)
         spec_sminus = hessian_spectrum(cfg, kappa, RootBranch.SHORT_MINUS)

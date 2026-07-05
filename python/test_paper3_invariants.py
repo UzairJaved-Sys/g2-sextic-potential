@@ -91,7 +91,12 @@ class TestMathematicalInvariants:
         c1, c2 = c1_frac * a**1.5, c2_frac * a**1.5
         _, b1 = iota(a, c1)
         _, b2 = iota(a, c2)
-        if abs(c1 - c2) > 1e-6:
+        # b1-b2 = 2*(c1-c2)*(c1+c2), so near c=0 the derivative db/dc vanishes
+        # and two distinct-but-close c values can map to b's closer than any
+        # fixed absolute threshold even though iota remains injective. Only
+        # assert separation once (c1+c2) is bounded away from that degenerate
+        # point, where the map is genuinely bi-Lipschitz.
+        if abs(c1 - c2) > 1e-6 and (c1 + c2) > 1e-3:
             assert abs(b1 - b2) > 1e-9, (
                 f"Distinct c1={c1}, c2={c2} on the half-chamber mapped to the same b={b1}; "
                 "iota should be injective there."
@@ -160,9 +165,13 @@ class TestMathematicalInvariants:
         # happens only when F_b == 0 (since b_aa=-6a!=0, b_cc=4!=0 generically).
         # For generic nonzero F_b, the two objects must differ in at least
         # one component -- this is exactly the paper's explicit caveat.
-        # Note: the correction terms scale as F_b * O(a), so numerical precision
-        # requires a slightly relaxed tolerance when |F_b| is very small.
-        if abs(F_b) > 1e-7:
+        # The correction terms are F_b*b_aa=-6*a*F_b and F_b*b_cc=4*F_b, so
+        # their scale is bounded by ~6*a*|F_b| (a<=3 here, so <=18*|F_b|).
+        # Use a cutoff/tolerance pair wide enough apart that this scaling
+        # can't flip the branch: at the F_b=1e-6 cutoff the correction is
+        # at most ~1.8e-5, safely inside a 1e-4 "coincide" tolerance, and
+        # safely outside the 1e-8 "differs" tolerance for any F_b above cutoff.
+        if abs(F_b) > 1e-6:
             assert not all(
                 math.isclose(p, q, rel_tol=1e-8, abs_tol=1e-8)
                 for p, q in zip(pullback, composed)
@@ -171,11 +180,11 @@ class TestMathematicalInvariants:
                 f"F_b={F_b} != 0; the paper's caveat that these differ should hold generically."
             )
         else:
-            # When F_b ≈ 0, the b_aa/b_cc correction terms are negligible and the two
-            # objects should coincide to numerical precision. Use relaxed tolerance
-            # to account for floating-point error propagation.
+            # When F_b ≈ 0, the b_aa/b_cc correction terms are bounded by
+            # ~18*1e-6 ~= 1.8e-5 in the worst case; use a tolerance well
+            # above that bound to avoid floating-point false negatives.
             for p, q in zip(pullback, composed):
-                assert math.isclose(p, q, rel_tol=1e-7, abs_tol=1e-7)
+                assert math.isclose(p, q, rel_tol=1e-4, abs_tol=1e-4)
 
     def test_T8_robustness_to_pathological_inputs(self):
         with pytest.raises(ValueError):
