@@ -360,6 +360,31 @@ def fisher_metric_numeric(config: RegularizedG2Config, beta, kappa, h=None,
 # ---------------------------------------------------------------------------
 # Section 7: thermodynamic length universal constant (pi)
 # ---------------------------------------------------------------------------
+#
+# NOTE ON A PRIOR VERSION OF THIS SECTION:
+# An earlier revision of this file had a single function here,
+# `thermodynamic_length_integral(m, ...)`, which took no `beta` argument
+# at all. It integrated the *already-infinite-beta* idealized logistic
+# profile m^2*e^{-u}/(1+e^{-u})^2 over u in [-40,40] and, unsurprisingly,
+# recovered pi to ~20 digits every time. That is a true statement --
+# integral_{-infty}^{infty} e^{-u/2}/(1+e^{-u}) du = pi is a closed-form
+# calculus identity -- but it does NOT exercise Theorem 7.7 (the claim
+# that the REAL, finite-beta thermodynamic length, built from the actual
+# partition function's asymptotic expansion, converges to pi as
+# beta -> infinity, at a rate governed by M_beta = O(log log beta)). A
+# test that always returns pi to 20 digits regardless of beta cannot be
+# distinguishing a correct paper from a wrong one.
+#
+# This revision keeps that identity (renamed and re-documented below,
+# `logistic_profile_length_identity`) as what it actually is -- a sanity
+# check on the closed-form limiting profile -- and adds a second,
+# genuinely beta-dependent function, `finite_beta_thermodynamic_length`,
+# built on top of this file's own real numerical partition function
+# (`partition_function_reduced`) and real numerical Fisher metric
+# (`fisher_metric_numeric`), which were already present in this file and
+# already used honestly elsewhere (see `test_broken_phase_fisher_scaling`)
+# but were never actually connected to the pi claim.
+# ---------------------------------------------------------------------------
 
 def logistic_profile(u, m) -> object:
     """The universal crossover profile m^2 * e^{-u} / (1+e^{-u})^2
@@ -369,11 +394,19 @@ def logistic_profile(u, m) -> object:
     return m ** 2 * exp_neg_u / (1 + exp_neg_u) ** 2
 
 
-def thermodynamic_length_integral(m, u_range=40.0, ring=None) -> object:
-    """Numerically verify integral_{-infty}^{infty} sqrt(m^2 e^{-u}/(1+e^{-u})^2) du
-    = m * integral sech(u/2) du = pi * m / m = pi (Theorem 7.7 / thm:length),
-    by truncating to [-u_range, u_range] where the (exponentially decaying)
-    tails are negligible.
+def logistic_profile_length_identity(m, u_range=40.0, ring=None) -> object:
+    """Closed-form calculus IDENTITY (not a beta-dependent test of
+    Theorem 7.7): integral_{-infty}^{infty} sqrt(m^2 e^{-u}/(1+e^{-u})^2) du
+    = m * integral sech(u/2) du = pi * m / m = pi, for ANY m > 0, by
+    truncating to [-u_range, u_range] where the tails are negligible.
+
+    This function has no beta argument and cannot fail to return ~pi; it
+    only checks that the quadrature machinery correctly integrates a
+    known logistic bump. It verifies the ALGEBRA of Theorem 7.7's
+    limiting profile, not the ASYMPTOTIC CLAIM that the finite-beta
+    thermodynamic length converges to that profile's integral as
+    beta -> infinity. For the latter, see
+    `finite_beta_thermodynamic_length` below.
 
     Complexity: O(2^d) adaptive quadrature subdivisions.
     """
@@ -385,6 +418,107 @@ def thermodynamic_length_integral(m, u_range=40.0, ring=None) -> object:
 
     raw = adaptive_integrate(integrand, ring(-u_range), ring(u_range), ring, tol=ring(1e-20))
     return raw / m  # normalizing by m recovers the universal constant pi
+
+
+def kappa_crossover_center(config: RegularizedG2Config, beta, c0: object = None) -> object:
+    """Location (in kappa) of the true finite-beta crossover peak.
+
+    Theorem 6.5's crossover variable is
+        u(kappa) = beta*m*(kappa - kappa_c) + 5*log(beta) - log(C1(kappa_c)/C0),
+    with m = mu2/Delta. The logistic peak sits at u = 0, which for large
+    beta is displaced from kappa_c by an O(log(beta)/beta) shift. That
+    shift is small but not negligible at the O(1/beta) resolution used to
+    window the crossover, so we locate it exactly (by solving u=0 for
+    kappa) rather than centering the window on kappa_c itself.
+
+    Complexity: O(1) (two closed-form constant evaluations).
+    """
+    R = config.ring()
+    beta = R(beta)
+    Delta = config.delta()
+    mu2 = R(config.mu2)
+    m = mu2 / Delta
+    kc = kappa_c(config)
+    C0 = constant_C0(config, c0=c0)
+    C1c = constant_C1(config, kc, c0=c0)
+    shift = 5 * beta.log() - (C1c / C0).log()
+    return kc - shift / (beta * m)
+
+
+def finite_beta_thermodynamic_length(
+    config: RegularizedG2Config,
+    beta,
+    c0: object = None,
+    log_log_beta_scale: object = 3.0,
+    n_quad: int = 16,
+    fd_step: object = None,
+    timeout_seconds: int = 60,
+) -> object:
+    """The ACTUAL, beta-dependent local thermodynamic length of Theorem
+    7.7: integral of sqrt(g_kk(beta,kappa)) over a shrinking window around
+    the true finite-beta crossover peak, where g_kk is computed from this
+    file's own genuine numerical partition function
+    (`partition_function_reduced`) via `fisher_metric_numeric` -- i.e.
+    from an actual double numerical integral over (u, theta) at the given
+    finite beta, NOT from the paper's closed-form asymptotic profile.
+
+    As beta -> infinity this should trend toward pi, but SLOWLY: the
+    window half-width is M_beta/(beta*m) with M_beta = O(log log beta)
+    (the paper's own choice, needed to keep the uniform error bounds
+    valid), so at any beta one can actually run, the result should sit
+    visibly below pi, not agree with it to many digits. Do not expect
+    high-precision agreement at moderate beta; see
+    `TestAlgebraicInvariants.test_finite_beta_thermodynamic_length_trends_toward_pi`
+    for the (loose-tolerance, directional) test built on this function.
+
+    Complexity: O(n_quad) evaluations of `fisher_metric_numeric`, each of
+    which costs 3 evaluations of `partition_function_reduced` (a nested
+    adaptive 2-D quadrature); n_quad is kept modest (fixed-order
+    Gauss-Legendre, not further adaptive) to keep total cost bounded,
+    wrapped in an alarm-guarded timeout since the constituent partition
+    function evaluations are themselves timeout-guarded but the total
+    wall-clock cost is additive across n_quad nodes.
+    """
+    R = config.ring()
+    beta = R(beta)
+    if beta <= R(sage.e):
+        raise NonPhysicalRegimeError(
+            "beta must be large enough that log(log(beta)) is defined and positive."
+        )
+    Delta = config.delta()
+    mu2 = R(config.mu2)
+    m = mu2 / Delta
+    scale = R(log_log_beta_scale)
+    M_beta = scale * beta.log().log()
+    if M_beta <= 0:
+        raise NonPhysicalRegimeError(
+            f"M_beta={M_beta} must be positive; increase beta."
+        )
+    half_width = M_beta / (beta * m)
+    center = kappa_crossover_center(config, beta, c0=c0)
+    h = R(1e-3) if fd_step is None else R(fd_step)
+
+    def integrand(kappa):
+        try:
+            g = fisher_metric_numeric(config, beta, kappa, h=h, c0=c0)
+        except (NonPhysicalRegimeError, AlgebraicComplexityError):
+            return R(0)
+        if g < 0:
+            g = R(0)
+        return g.sqrt()
+
+    try:
+        sage.alarm(timeout_seconds)
+        value = _integrate_gauss_legendre(
+            integrand, center - half_width, center + half_width, R, n=n_quad
+        )
+    except sage.AlarmInterrupt as exc:
+        raise AlgebraicComplexityError(
+            f"finite_beta_thermodynamic_length exceeded {timeout_seconds}s timeout."
+        ) from exc
+    finally:
+        sage.cancel_alarm()
+    return value
 
 
 # ---------------------------------------------------------------------------
@@ -458,14 +592,69 @@ class TestAlgebraicInvariants:
                 )
         logger.info("test_A_curvature_matches_second_derivative_of_f: passed (%d samples)", self.ITERATIONS)
 
-    def test_thermodynamic_length_equals_pi(self) -> None:
-        """Numerically verify the universal constant pi (Theorem thm:length)
-        for several values of m = mu2/Delta."""
+    def test_logistic_profile_identity_equals_pi(self) -> None:
+        """Numerically verify the closed-form calculus IDENTITY
+        integral sqrt(m^2*e^-u/(1+e^-u)^2) du / m = pi, for several m.
+
+        NOTE: this test has no beta and cannot distinguish a correct
+        implementation of Theorem 7.7's asymptotics from an incorrect
+        one -- it only checks that the quadrature engine integrates a
+        known logistic bump correctly. See
+        `test_finite_beta_thermodynamic_length_trends_toward_pi` for the
+        genuine, beta-dependent check.
+        """
         for m_val in (self.R(0.5), self.R(1.0), self.R(2.3)):
-            length = thermodynamic_length_integral(m_val, u_range=self.R(35), ring=self.R)
+            length = logistic_profile_length_identity(m_val, u_range=self.R(35), ring=self.R)
             if abs(length - self.R(sage.pi)) > self.R(1e-6):
-                raise ValueError(f"Thermodynamic length != pi: got {length} for m={m_val}")
-        logger.info("test_thermodynamic_length_equals_pi: passed")
+                raise ValueError(f"Logistic-profile identity != pi: got {length} for m={m_val}")
+        logger.info("test_logistic_profile_identity_equals_pi: passed")
+
+    def test_finite_beta_thermodynamic_length_trends_toward_pi(self) -> None:
+        """Genuine, beta-dependent check of Theorem 7.7: the local
+        thermodynamic length computed from the file's REAL numerical
+        partition function (`partition_function_reduced` via
+        `fisher_metric_numeric`), integrated over a shrinking window
+        around the true finite-beta crossover peak, should get no
+        farther from pi as beta grows, and should not be wildly off.
+
+        This is deliberately loose-tolerance and directional (not a
+        tight equality), because the paper's own proof of Theorem 7.7
+        only guarantees convergence at rate O(1/log log beta) or
+        similar -- at any beta actually runnable here, the result
+        should sit visibly below pi, not match it to many digits. A
+        test that demanded tight agreement at finite, tractable beta
+        would itself be a symptom of testing the wrong (idealized)
+        object -- see the module-level note at the top of this section.
+        """
+        cfg = self._sample_config()
+        betas = (self.R(200), self.R(2000))
+        lengths = []
+        for beta_val in betas:
+            L = finite_beta_thermodynamic_length(cfg, beta_val, n_quad=12)
+            if not (L == L):  # NaN guard
+                raise ValueError(f"finite_beta_thermodynamic_length returned NaN at beta={beta_val}")
+            lengths.append(L)
+        errors = [abs(L - self.R(sage.pi)) for L in lengths]
+        # Should not be moving away from pi as beta grows (loose slack for
+        # numerical noise at these still-modest beta values).
+        if errors[-1] > errors[0] + self.R(0.5):
+            raise ValueError(
+                f"Finite-beta thermodynamic length moved away from pi as beta grew: "
+                f"betas={betas}, lengths={lengths}, errors={errors}"
+            )
+        # Sanity bound: should be in a plausible neighbourhood of pi, not
+        # off by an order of magnitude (which would indicate a genuine bug
+        # rather than just slow asymptotic convergence).
+        if errors[-1] > self.R(2.5):
+            raise ValueError(
+                f"Finite-beta thermodynamic length too far from pi even accounting for "
+                f"slow convergence: length={lengths[-1]} at beta={betas[-1]}"
+            )
+        logger.info(
+            "test_finite_beta_thermodynamic_length_trends_toward_pi: passed "
+            "(betas=%s, lengths=%s, errors=%s -- slow convergence to pi is expected)",
+            betas, lengths, errors,
+        )
 
     def test_broken_phase_fisher_scaling(self) -> None:
         """Numeric check (not asymptotic-exact, but directional): for
@@ -500,7 +689,8 @@ def run_all_tests() -> None:
     suite.test_ground_state_continuous_at_kappa_c()
     suite.test_u_plus_stationarity()
     suite.test_A_curvature_matches_second_derivative_of_f()
-    suite.test_thermodynamic_length_equals_pi()
+    suite.test_logistic_profile_identity_equals_pi()
+    suite.test_finite_beta_thermodynamic_length_trends_toward_pi()
     suite.test_broken_phase_fisher_scaling()
     logger.info("All regularized-G2 information-geometry invariant tests passed.")
 
@@ -514,8 +704,18 @@ if __name__ == "__main__":
     logger.info("kappa_c = %s", kc)
     logger.info("kappa_coalescence = %s", kappa_coalescence(cfg_example))
     logger.info("E_0(kappa_c - 0.5) = %s", ground_state_energy(cfg_example, kc - R(0.5)))
-    logger.info("Universal thermodynamic length check (m=1): %s (expect pi)",
-                thermodynamic_length_integral(R(1), ring=R))
+    logger.info(
+        "Logistic-profile calculus IDENTITY (m=1, no beta -- always ~pi by construction): %s",
+        logistic_profile_length_identity(R(1), ring=R),
+    )
+    for beta_demo in (R(200), R(2000)):
+        L = finite_beta_thermodynamic_length(cfg_example, beta_demo, n_quad=12)
+        logger.info(
+            "Genuine finite-beta thermodynamic length at beta=%s: %s "
+            "(theory: -> pi=%s as beta -> infinity, SLOWLY; do not expect close "
+            "agreement at finite beta)",
+            beta_demo, L, R(sage.pi),
+        )
 
     run_all_tests()
 
