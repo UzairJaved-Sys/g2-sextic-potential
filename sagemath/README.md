@@ -19,14 +19,24 @@ Both files target pure Python 3 syntax over the SageMath library, using `import 
 
 ## Verified usage
 
-The scripts were verified in this environment with the Sage CLI:
+`g2_truncated_sextic_potential.py` was verified in this environment with the Sage CLI:
 
 ```bash
 sage -q g2_truncated_sextic_potential.py
-sage -q g2_stabilized_information_geometry.py
 ```
 
-Both commands completed successfully and exited with status `0`.
+and completed successfully, exiting with status `0`.
+
+`g2_stabilized_information_geometry.py` was revised (2026-07) to fix its
+thermodynamic-length check — the previous `thermodynamic_length_integral`
+never took a `beta` argument and only re-verified a closed-form calculus
+identity, not the paper's actual finite-beta asymptotic claim (Theorem
+7.7). It has **not yet been re-run against a real Sage installation**
+after this fix; run it yourself and confirm before relying on it:
+
+```bash
+sage -q g2_stabilized_information_geometry.py
+```
 
 You can also run them directly inside a Sage session:
 
@@ -73,9 +83,10 @@ It includes:
 - `A_curvature` for the broken-phase Fisher-metric coefficient
 - `constant_C0` and `constant_C1` for the closed-form asymptotic coefficients
 - `partition_function_reduced` and `fisher_metric_numeric` for direct finite-$\beta$ numerics
-- `thermodynamic_length_integral` for the universal crossover-length check
+- `logistic_profile_length_identity` — closed-form calculus check that the idealized crossover profile integrates to $\pi$ (has no `beta` argument; verifies the algebra of the limiting profile only, not the paper's asymptotic claim)
+- `kappa_crossover_center` and `finite_beta_thermodynamic_length` — the genuine, $\beta$-dependent thermodynamic length (Theorem 7.7), built from `partition_function_reduced`/`fisher_metric_numeric` at an actual finite $\beta$, expected to converge to $\pi$ only slowly as $\beta\to\infty$
 
-The verification suite checks ground-state continuity, stationarity, curvature consistency, the $\pi$ thermodynamic-length identity, and the Fisher-metric scaling behavior.
+The verification suite checks ground-state continuity, stationarity, curvature consistency, the closed-form $\pi$ identity, the genuine finite-$\beta$ trend toward $\pi$, and the Fisher-metric scaling behavior.
 
 ---
 
